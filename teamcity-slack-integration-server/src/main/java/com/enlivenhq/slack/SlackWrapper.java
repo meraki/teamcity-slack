@@ -1,11 +1,11 @@
 package com.enlivenhq.slack;
 
-import com.enlivenhq.teamcity.SlackNotificator;
-import com.enlivenhq.teamcity.SlackPayload;
+import com.enlivenhq.teamcity.*;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import jetbrains.buildServer.Build;
 import jetbrains.buildServer.serverSide.TeamCityProperties;
+import jetbrains.buildServer.tests.TestName;
 import jetbrains.buildServer.web.util.WebUtil;
 import org.apache.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
@@ -13,6 +13,7 @@ import org.jetbrains.annotations.NotNull;
 import javax.net.ssl.HttpsURLConnection;
 import java.io.*;
 import java.net.URL;
+import java.util.Collection;
 
 public class SlackWrapper
 {
@@ -39,6 +40,16 @@ public class SlackWrapper
     public String send(String project, String build, String branch, String statusText, String statusColor, Build bt) throws IOException
     {
         String formattedPayload = getFormattedPayload(project, build, branch, statusText, statusColor, bt.getBuildTypeExternalId(), bt.getBuildId());
+        return send(formattedPayload);
+    }
+
+    public String sendResponsibility(ProjectEntry project, Collection<TestEntry> testEntries, String fromUser, String toUser, String byUser) throws IOException {
+        String formattedPayload = getFormattedResponsibilityPayload(project, testEntries, fromUser, toUser, byUser);
+        return send(formattedPayload);
+    }
+
+    private String send(String formattedPayload) throws IOException
+    {
         LOG.debug(formattedPayload);
 
         URL url = new URL(this.getSlackUrl());
@@ -50,7 +61,7 @@ public class SlackWrapper
         httpsURLConnection.setDoOutput(true);
 
         DataOutputStream dataOutputStream = new DataOutputStream(
-            httpsURLConnection.getOutputStream()
+                httpsURLConnection.getOutputStream()
         );
 
         //dataOutputStream.writeBytes(formattedPayload);
@@ -79,15 +90,29 @@ public class SlackWrapper
     }
 
     @NotNull
+    public String getFormattedResponsibilityPayload(ProjectEntry project, Collection<TestEntry> testEntries, String fromUser, String toUser, String byUser) {
+        Gson gson = GSON_BUILDER.create();
+
+        SlackPayload slackPayload = new SlackResponsibilityPayload(project, testEntries, fromUser, toUser, byUser, WebUtil.escapeUrlForQuotes(getServerUrl()));
+        setupSlackPayload(slackPayload);
+
+        return gson.toJson(slackPayload);
+    }
+
+    @NotNull
     public String getFormattedPayload(String project, String build, String branch, String statusText, String statusColor, String btId, long buildId) {
         Gson gson = GSON_BUILDER.create();
 
-        SlackPayload slackPayload = new SlackPayload(project, build, branch, statusText, statusColor, btId, buildId, WebUtil.escapeUrlForQuotes(getServerUrl()));
+        SlackPayload slackPayload = new SlackBuildPayload(project, build, branch, statusText, statusColor, btId, buildId, WebUtil.escapeUrlForQuotes(getServerUrl()));
+        setupSlackPayload(slackPayload);
+
+        return gson.toJson(slackPayload);
+    }
+
+    private void setupSlackPayload(SlackPayload slackPayload) {
         slackPayload.setChannel(getChannel());
         slackPayload.setUsername(getUsername());
         slackPayload.setUseAttachments(this.useAttachment);
-
-        return gson.toJson(slackPayload);
     }
 
     private String getResponseBody(InputStream inputStream, String responseBody) throws IOException {

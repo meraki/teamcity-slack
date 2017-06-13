@@ -20,15 +20,14 @@ import jetbrains.buildServer.tests.TestName;
 import jetbrains.buildServer.users.NotificatorPropertyKey;
 import jetbrains.buildServer.users.PropertyKey;
 import jetbrains.buildServer.users.SUser;
+import jetbrains.buildServer.users.User;
 import jetbrains.buildServer.vcs.VcsRoot;
 import org.apache.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Set;
+import java.util.*;
 
 public class SlackNotificator implements Notificator {
 
@@ -92,27 +91,41 @@ public class SlackNotificator implements Notificator {
     }
 
     public void notifyResponsibleChanged(@NotNull SBuildType sBuildType, @NotNull Set<SUser> sUsers) {
-
     }
 
     public void notifyResponsibleAssigned(@NotNull SBuildType sBuildType, @NotNull Set<SUser> sUsers) {
 
     }
 
-    public void notifyResponsibleChanged(@Nullable TestNameResponsibilityEntry testNameResponsibilityEntry, @NotNull TestNameResponsibilityEntry testNameResponsibilityEntry2, @NotNull SProject sProject, @NotNull Set<SUser> sUsers) {
-
+    public void notifyResponsibleChanged(@Nullable TestNameResponsibilityEntry fromEntry, @NotNull TestNameResponsibilityEntry toEntry, @NotNull SProject sProject, @NotNull Set<SUser> sUsers) {
+        Collection<TestEntry> testEntries = Collections.singletonList(new TestEntry(toEntry));
+        User fromUser = null;
+        if (fromEntry != null) { fromUser = fromEntry.getResponsibleUser(); }
+        sendResponsibilityNotification(new ProjectEntry(sProject), testEntries, fromUser, toEntry.getResponsibleUser(), toEntry.getReporterUser(), sUsers);
     }
 
-    public void notifyResponsibleAssigned(@Nullable TestNameResponsibilityEntry testNameResponsibilityEntry, @NotNull TestNameResponsibilityEntry testNameResponsibilityEntry2, @NotNull SProject sProject, @NotNull Set<SUser> sUsers) {
-
+    public void notifyResponsibleAssigned(@Nullable TestNameResponsibilityEntry fromEntry, @NotNull TestNameResponsibilityEntry toEntry, @NotNull SProject sProject, @NotNull Set<SUser> sUsers) {
+        Collection<TestEntry> testEntries = Collections.singletonList(new TestEntry(toEntry));
+        User fromUser = null;
+        if (fromEntry != null) { fromUser = fromEntry.getResponsibleUser(); }
+        sendResponsibilityNotification(new ProjectEntry(sProject), testEntries, fromUser, toEntry.getResponsibleUser(), toEntry.getReporterUser(), sUsers);
     }
 
-    public void notifyResponsibleChanged(@NotNull Collection<TestName> testNames, @NotNull ResponsibilityEntry responsibilityEntry, @NotNull SProject sProject, @NotNull Set<SUser> sUsers) {
+    public void notifyResponsibleChanged(@NotNull Collection<TestName> testNames, @NotNull ResponsibilityEntry toEntry, @NotNull SProject sProject, @NotNull Set<SUser> sUsers) {
 
+        Set<TestEntry> testEntries = new HashSet<TestEntry>();
+        for (TestName n : testNames) {
+            testEntries.add(new TestEntry(n));
+        }
+        sendResponsibilityNotification(new ProjectEntry(sProject), testEntries, null, toEntry.getResponsibleUser(), toEntry.getReporterUser(), sUsers);
     }
 
-    public void notifyResponsibleAssigned(@NotNull Collection<TestName> testNames, @NotNull ResponsibilityEntry responsibilityEntry, @NotNull SProject sProject, @NotNull Set<SUser> sUsers) {
-
+    public void notifyResponsibleAssigned(@NotNull Collection<TestName> testNames, @NotNull ResponsibilityEntry toEntry, @NotNull SProject sProject, @NotNull Set<SUser> sUsers) {
+        Set<TestEntry> testEntries = new HashSet<TestEntry>();
+        for (TestName n : testNames) {
+            testEntries.add(new TestEntry(n));
+        }
+        sendResponsibilityNotification(new ProjectEntry(sProject), testEntries, null, toEntry.getResponsibleUser(), toEntry.getReporterUser(), sUsers);
     }
 
     public void notifyBuildProblemResponsibleAssigned(@NotNull Collection<BuildProblemInfo> buildProblemInfos, @NotNull ResponsibilityEntry responsibilityEntry, @NotNull SProject sProject, @NotNull Set<SUser> sUsers) {
@@ -167,6 +180,38 @@ public class SlackNotificator implements Notificator {
         }
     }
 
+    private void sendResponsibilityNotification(ProjectEntry project, Collection<TestEntry> testEntries, User fromUser, User toUser, User byUser, Set<SUser> users) {
+        String fromUserS = null;
+        if (fromUser != null) {
+            fromUserS = fromUser.getUsername();
+        }
+        for (SUser user : users) {
+            SlackWrapper slackWrapper = getSlackDmWrapperWithUser(toUser, user);
+            try {
+                slackWrapper.sendResponsibility(project, testEntries, fromUserS, toUser.getUsername(), byUser.getUsername());
+            } catch (IOException e) {
+                log.error(e.getMessage());
+            }
+        }
+    }
+
+    private SlackWrapper getSlackDmWrapperWithUser(User user, User botUser) {
+        String channel = "@" + user.getUsername();
+        String username = botUser.getPropertyValue(slackUsername);
+        String url = botUser.getPropertyValue(slackUrl);
+        String verbose = botUser.getPropertyValue(slackVerbose);
+
+        if (slackConfigurationIsInvalid(channel, username, url, verbose)) {
+            log.error("Could not send Slack notification. The Slack channel, username, or URL was null. " +
+                    "Double check your Notification settings");
+
+            return new SlackWrapper();
+        }
+
+        boolean useAttachments = convertToBoolean(verbose);
+        return constructSlackWrapper(channel, username, url, useAttachments);
+    }
+
     private SlackWrapper getSlackWrapperWithUser(SUser user) {
         String channel = user.getPropertyValue(slackChannel);
         String username = user.getPropertyValue(slackUsername);
@@ -175,13 +220,12 @@ public class SlackNotificator implements Notificator {
 
         if (slackConfigurationIsInvalid(channel, username, url, verbose)) {
             log.error("Could not send Slack notification. The Slack channel, username, or URL was null. " +
-                      "Double check your Notification settings");
-
+                    "Double check your Notification settings");
             return new SlackWrapper();
         }
 
-        boolean useAttachements = convertToBoolean(verbose);
-        return constructSlackWrapper(channel, username, url, useAttachements);
+        boolean useAttachments = convertToBoolean(verbose);
+        return constructSlackWrapper(channel, username, url, useAttachments);
     }
 
     private boolean slackConfigurationIsInvalid(String channel, String username, String url, String verbose) {
@@ -201,7 +245,7 @@ public class SlackNotificator implements Notificator {
 
     private String getBranch(SBuild build) {
         Branch branch = build.getBranch();
-        if (branch != null && branch.getName() != "<default>") {
+        if (branch != null && !branch.getName().equals("<default>")) {
             return branch.getDisplayName();
         } else {
             return "";
